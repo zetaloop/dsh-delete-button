@@ -4,6 +4,10 @@
   "description": "Delete conversations and their owned subagents in DeepSeek Harness.",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zetaloop/dsh-delete-button.git"
+  },
   "exports": {
     ".": "./dist/index.js",
     "./client": "./dist/client.js"

@@ -1,0 +1,55 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: What to do with the package
+        type: choice
+        options: [dryrun, draft]
+        default: dryrun
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-tags: true
+      - uses: pnpm/setup@v3
+        with:
+          version: latest
+          runtime: node@26
+      - uses: biomejs/setup-biome@v2
+      - run: pnpm check
+      - run: pnpm pack
+      - uses: actions/upload-artifact@v7
+        with:
+          name: package
+          path: dsh-delete-button-*.tgz
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Create release draft
+        if: github.event_name == 'push' || inputs.mode == 'draft'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag=$GITHUB_REF_NAME
+          if [ "$GITHUB_REF_TYPE" != tag ]; then
+            tag=$(git tag --points-at HEAD --list 'v*' | head -1)
+          fi
+          if [ -z "$tag" ]; then
+            echo "::notice::No version tag at HEAD; the package is available in this workflow run"
+            exit 0
+          fi
+          version=$(jq -r .version package.json)
+          test "$tag" = "v$version"
+          prerelease=()
+          if [[ "$version" == *-* ]]; then prerelease=(--prerelease); fi
+          gh release create "$tag" "dsh-delete-button-$version.tgz" --verify-tag --draft --title "$tag" --generate-notes "${prerelease[@]}"

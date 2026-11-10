@@ -143,7 +143,7 @@ class SessionDeletion extends TypertRemoteService {
           .get('session_projcache')
           ?.table('sessions')
           .delete(header.id)
-        this.ctx.emit('api-session/removed', header.id)
+        this.ctx.emit('api-session/removed', header.id, name)
       }
     } finally {
       for (const { header } of targets) {

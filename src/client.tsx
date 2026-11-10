@@ -13,7 +13,13 @@ import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import { type Inspection, TYPERT_REMOTE } from './remote.js'
 
-export const inject = ['remote', 'contextMenus', 'slots', 'locale']
+export const inject = [
+  'remote',
+  'contextMenus',
+  'slots',
+  'locale',
+  'uiWorkspace',
+]
 
 const labels = {
   en: {
@@ -235,6 +241,21 @@ function Overlay({ ctx, selected }: ViewProps) {
 export async function apply(ctx: Context) {
   await ctx.remote.$mount(TYPERT_REMOTE)
   ctx.inject(['remote.sessionDeletion'], (ctx) => {
+    // The native archive action clears both the saved selection and its retained view.
+    const workspace = ctx.uiWorkspace as Context['uiWorkspace'] & {
+      mainReference?: { sessionId: string }
+      clearMain(): void
+    }
+    ctx.effect(() =>
+      ctx.remote.$on('api-session/removed', (id: string, source?: string) => {
+        if (
+          source === 'delete-button' &&
+          workspace.mainReference?.sessionId === id
+        ) {
+          workspace.clearMain()
+        }
+      }),
+    )
     ctx.effect(() => ctx.locale.register('deleteButton', labels))
     const selected = createSnapshotStore<Selection | null>(null)
     const t = ctx.locale.bind('deleteButton')

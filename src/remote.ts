@@ -1,3 +1,4 @@
+import type { SessionId } from '@deepseek-ai/dsh-session'
 import type {
   RemoteResult,
   TypertRemoteNamespace,
@@ -39,6 +40,12 @@ export const TYPERT_REMOTE = createTypertRemoteInfo(
   },
   z,
 )
+
+declare module '@deepseek-ai/cordis' {
+  interface Events {
+    'api-session/removed'(sessionId: SessionId, source?: string): void
+  }
+}
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface TypertRemoteMap {

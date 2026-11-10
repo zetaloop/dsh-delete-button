@@ -37,6 +37,72 @@ const labels = {
     loading: '正在读取对话…',
     deleting: '正在删除对话…',
   },
+  ja: {
+    delete: '会話を削除',
+    cancel: 'キャンセル',
+    close: '閉じる',
+    description: '「{title}」の会話履歴を完全に削除します。',
+    children: 'サブエージェントの会話 {count} 件も削除します。',
+    active: '削除する前に、実行中の処理を停止します。',
+    loading: '会話を読み込み中…',
+    deleting: '会話を削除中…',
+  },
+  es: {
+    delete: 'Eliminar conversación',
+    cancel: 'Cancelar',
+    close: 'Cerrar',
+    description:
+      'Se eliminará permanentemente el historial de la conversación «{title}».',
+    children:
+      'Conversaciones de subagentes que también se eliminarán: {count}.',
+    active:
+      'Las tareas en curso se detendrán antes de eliminar la conversación.',
+    loading: 'Cargando conversación…',
+    deleting: 'Eliminando conversación…',
+  },
+  fr: {
+    delete: 'Supprimer la conversation',
+    cancel: 'Annuler',
+    close: 'Fermer',
+    description:
+      'L’historique de la conversation « {title} » sera définitivement supprimé.',
+    children: 'Conversations de sous-agents également supprimées : {count}.',
+    active: 'Les tâches en cours seront arrêtées avant la suppression.',
+    loading: 'Chargement de la conversation…',
+    deleting: 'Suppression de la conversation…',
+  },
+  de: {
+    delete: 'Unterhaltung löschen',
+    cancel: 'Abbrechen',
+    close: 'Schließen',
+    description:
+      'Der Verlauf der Unterhaltung „{title}“ wird dauerhaft gelöscht.',
+    children: 'Zusätzlich zu löschende Subagenten-Unterhaltungen: {count}.',
+    active: 'Laufende Aufgaben werden vor dem Löschen beendet.',
+    loading: 'Unterhaltung wird geladen…',
+    deleting: 'Unterhaltung wird gelöscht…',
+  },
+  ru: {
+    delete: 'Удалить диалог',
+    cancel: 'Отмена',
+    close: 'Закрыть',
+    description: 'История диалога «{title}» будет удалена безвозвратно.',
+    children: 'Диалоги субагентов, которые также будут удалены: {count}.',
+    active: 'Перед удалением выполняемые задачи будут остановлены.',
+    loading: 'Загрузка диалога…',
+    deleting: 'Удаление диалога…',
+  },
+  pt: {
+    delete: 'Excluir conversa',
+    cancel: 'Cancelar',
+    close: 'Fechar',
+    description:
+      'O histórico da conversa “{title}” será excluído permanentemente.',
+    children: 'Conversas de subagentes que também serão excluídas: {count}.',
+    active: 'As tarefas em andamento serão interrompidas antes da exclusão.',
+    loading: 'Carregando conversa…',
+    deleting: 'Excluindo conversa…',
+  },
 }
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {

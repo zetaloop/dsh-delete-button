@@ -1,0 +1,4 @@
+{
+  "extends": "./tsconfig.json",
+  "include": ["src/index.ts", "src/lifecycle.ts", "src/remote.ts", "build.ts"]
+}

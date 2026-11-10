@@ -1,5 +1,5 @@
-import { rm } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { readdir, rm, rmdir } from 'node:fs/promises'
+import { basename, dirname, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-api-session-controller'
 import { SessionId } from '@deepseek-ai/dsh-session'
@@ -116,26 +116,30 @@ class SessionDeletion extends TypertRemoteService {
         })
         await this.lifecycle.release(target, this.ctx.agents.get(target))
       }
-      for (const target of targets.toReversed()) {
-        const snapshot = await this.ctx.sessionPersistence.stat(target)
+      await using handles = new AsyncDisposableStack()
+      const locations = new Map<SessionId, string>()
+      for (const target of targets) {
         if (this.ctx.sessions.get(target))
           throw new Error('Conversation is still open.')
-        if (snapshot && snapshot.location?.kind !== 'jsonl')
+        const handle = await this.ctx.sessionPersistence
+          .open(target, 'write')
+          .catch((error: unknown) => {
+            if (error instanceof SessionPersistenceNotFoundError)
+              return undefined
+            throw error
+          })
+        if (!handle) continue
+        handles.use(handle)
+        const snapshot = await this.ctx.sessionPersistence.stat(target)
+        if (!snapshot)
+          throw new Error('Conversation storage could not be inspected.')
+        if (snapshot.location?.kind !== 'jsonl')
           throw new Error(
             'Session storage does not expose a conversation directory.',
           )
-        if (!snapshot) {
-          try {
-            const handle = await this.ctx.sessionPersistence.open(
-              target,
-              'read',
-            )
-            await handle.close()
-            throw new Error('Conversation storage could not be inspected.')
-          } catch (error) {
-            if (!(error instanceof SessionPersistenceNotFoundError)) throw error
-          }
-        }
+        locations.set(target, snapshot.location.path)
+      }
+      for (const target of targets.toReversed()) {
         // Retain the logs until accounting succeeds so a retry can rediscover every child.
         const results = await Promise.allSettled([
           ...this.ctx.workspaceRegistry
@@ -161,8 +165,19 @@ class SessionDeletion extends TypertRemoteService {
               .join('\n'),
           )
         }
-        if (snapshot?.location) {
-          await rm(dirname(snapshot.location.path), { recursive: true })
+        const location = locations.get(target)
+        if (location) {
+          const directory = dirname(location)
+          const current = basename(location)
+          const entries = await readdir(directory)
+          // Keep the current generation discoverable until every older log is gone.
+          entries.sort((a, b) => Number(a === current) - Number(b === current))
+          for (const entry of entries) {
+            // POSIX leases require the lock file's inode to survive deletion.
+            if (entry !== 'session.lock')
+              await rm(join(directory, entry), { recursive: true })
+          }
+          if (!entries.includes('session.lock')) await rmdir(directory)
         }
         removed.add(target)
         this.ctx.emit('api-session/removed', target, name)

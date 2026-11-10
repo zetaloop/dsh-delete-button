@@ -1,0 +1,5 @@
+- insert:
+    - id: delete-button
+      name: dsh-delete-button
+- id: agent-loop
+  inject: [sessionDeletion]

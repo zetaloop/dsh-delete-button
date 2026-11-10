@@ -3,7 +3,7 @@ import { dirname } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-api-session-controller'
 import { SessionId } from '@deepseek-ai/dsh-session'
-import type { SessionPersistenceSnapshot } from '@deepseek-ai/dsh-session-persistence'
+import { SessionPersistenceNotFoundError } from '@deepseek-ai/dsh-session-persistence'
 import type {} from '@deepseek-ai/dsh-session-query'
 import type {} from '@deepseek-ai/dsh-storage-domain'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
@@ -40,19 +40,17 @@ class SessionDeletion extends TypertRemoteService {
 
   private async family(id: SessionId) {
     const snapshots = await this.ctx.sessionPersistence.list()
-    const root = snapshots.find((snapshot) => snapshot.header.id === id)
-    if (!root) throw new Error('Conversation not found.')
-    const family: SessionPersistenceSnapshot[] = [root]
+    const family = [id]
     const visited = new Set([id])
     for (const parent of family) {
       for (const child of snapshots) {
         if (
           child.header.origin === 'subagent' &&
-          child.header.parentSession === parent.header.id &&
+          child.header.parentSession === parent &&
           !visited.has(child.header.id)
         ) {
           visited.add(child.header.id)
-          family.push(child)
+          family.push(child.header.id)
         }
       }
     }
@@ -63,11 +61,9 @@ class SessionDeletion extends TypertRemoteService {
   async inspect(value: string) {
     const family = await this.family(SessionId(value))
     const activity = await Promise.all(
-      family.map(({ header }) =>
-        this.ctx.waterfall(
-          'workspace/session-activity',
-          { sessionId: header.id },
-          () => Promise.resolve([]),
+      family.map((sessionId) =>
+        this.ctx.waterfall('workspace/session-activity', { sessionId }, () =>
+          Promise.resolve([]),
         ),
       ),
     )
@@ -89,65 +85,91 @@ class SessionDeletion extends TypertRemoteService {
 
   private async remove(id: SessionId) {
     const targets = await this.family(id)
-    for (const snapshot of targets) {
-      if (snapshot.location && snapshot.location.kind !== 'jsonl') {
+    for (const target of targets) {
+      const snapshot = await this.ctx.sessionPersistence.stat(target)
+      if (snapshot?.location && snapshot.location.kind !== 'jsonl') {
         throw new Error('Unsupported session storage.')
       }
-      if (!snapshot.location && !this.ctx.sessions.get(snapshot.header.id)) {
+      if (snapshot && !snapshot.location && !this.ctx.sessions.get(target)) {
         throw new Error(
           'Session storage does not expose a conversation directory.',
         )
       }
     }
     const removed = new Set<SessionId>()
-    for (const { header } of targets) this.lifecycle.blocked.add(header.id)
+    for (const target of targets) this.lifecycle.blocked.add(target)
     try {
       // The owner's disposer also joins child creation and releases agent-scoped PTC and terminals.
-      for (const { header } of targets) {
+      for (const target of targets) {
         await this.ctx.parallel('workspace/session-stop', {
-          sessionId: header.id,
+          sessionId: target,
         })
-        await this.lifecycle.release(header.id, this.ctx.agents.get(header.id))
+        await this.lifecycle.release(target, this.ctx.agents.get(target))
       }
       const settled = await this.family(id)
-      for (const snapshot of settled) {
-        if (targets.some((target) => target.header.id === snapshot.header.id))
-          continue
-        targets.push(snapshot)
-        this.lifecycle.blocked.add(snapshot.header.id)
+      for (const target of settled) {
+        if (targets.includes(target)) continue
+        targets.push(target)
+        this.lifecycle.blocked.add(target)
         await this.ctx.parallel('workspace/session-stop', {
-          sessionId: snapshot.header.id,
+          sessionId: target,
         })
-        await this.lifecycle.release(
-          snapshot.header.id,
-          this.ctx.agents.get(snapshot.header.id),
-        )
+        await this.lifecycle.release(target, this.ctx.agents.get(target))
       }
-      for (const { header } of targets.toReversed()) {
-        const snapshot = await this.ctx.sessionPersistence.stat(header.id)
-        if (this.ctx.sessions.get(header.id))
+      for (const target of targets.toReversed()) {
+        const snapshot = await this.ctx.sessionPersistence.stat(target)
+        if (this.ctx.sessions.get(target))
           throw new Error('Conversation is still open.')
-        if (snapshot) {
-          if (snapshot.location?.kind !== 'jsonl')
-            throw new Error(
-              'Session storage does not expose a conversation directory.',
+        if (snapshot && snapshot.location?.kind !== 'jsonl')
+          throw new Error(
+            'Session storage does not expose a conversation directory.',
+          )
+        if (!snapshot) {
+          try {
+            const handle = await this.ctx.sessionPersistence.open(
+              target,
+              'read',
             )
+            await handle.close()
+            throw new Error('Conversation storage could not be inspected.')
+          } catch (error) {
+            if (!(error instanceof SessionPersistenceNotFoundError)) throw error
+          }
+        }
+        // Retain the logs until accounting succeeds so a retry can rediscover every child.
+        const results = await Promise.allSettled([
+          ...this.ctx.workspaceRegistry
+            .list()
+            .map((workspace) => workspace.detachSession(target)),
+          this.ctx.workspaceRegistry.unpinSession(target),
+          this.ctx.workspaceRegistry.unarchiveSession(target),
+          this.ctx.storageDomain
+            .get('session_projcache')
+            ?.table('sessions')
+            .delete(target),
+        ])
+        const failures: unknown[] = results.flatMap((result) =>
+          result.status === 'rejected' ? [result.reason] : [],
+        )
+        if (failures.length) {
+          throw new AggregateError(
+            failures,
+            failures
+              .map((error) =>
+                error instanceof Error ? error.message : String(error),
+              )
+              .join('\n'),
+          )
+        }
+        if (snapshot?.location) {
           await rm(dirname(snapshot.location.path), { recursive: true })
         }
-        removed.add(header.id)
-        for (const workspace of this.ctx.workspaceRegistry.list())
-          await workspace.detachSession(header.id)
-        await this.ctx.workspaceRegistry.unpinSession(header.id)
-        await this.ctx.workspaceRegistry.unarchiveSession(header.id)
-        await this.ctx.storageDomain
-          .get('session_projcache')
-          ?.table('sessions')
-          .delete(header.id)
-        this.ctx.emit('api-session/removed', header.id, name)
+        removed.add(target)
+        this.ctx.emit('api-session/removed', target, name)
       }
     } finally {
-      for (const { header } of targets) {
-        if (!removed.has(header.id)) this.lifecycle.blocked.delete(header.id)
+      for (const target of targets) {
+        if (!removed.has(target)) this.lifecycle.blocked.delete(target)
       }
     }
   }

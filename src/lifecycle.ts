@@ -14,7 +14,6 @@ type Initialize = (
   options: {
     session: Session
     stored?: { handle: SessionHandle }
-    parentAgent?: Agent
   },
 ) => Promise<AgentHandle>
 type Put = (
@@ -58,7 +57,7 @@ export class Lifecycles {
       'createAgent',
       (original) =>
         function (this: AgentLoop, context, options) {
-          return owner.start(options.sessionId, options.parentAgent?.id, () =>
+          return owner.start(options.sessionId, () =>
             original.call(this, context, options),
           )
         },
@@ -69,9 +68,7 @@ export class Lifecycles {
       'create',
       (original) =>
         function (this: AgentLoop, id, options, meta) {
-          return owner.start(id, undefined, () =>
-            original.call(this, id, options, meta),
-          )
+          return owner.start(id, () => original.call(this, id, options, meta))
         },
     )
     type Resume = (
@@ -86,10 +83,8 @@ export class Lifecycles {
       'resumeWith',
       (original) =>
         function (context, persistence, options) {
-          return owner.start(
-            options.resumeSessionId,
-            options.parentAgent?.id,
-            () => original.call(this, context, persistence, options),
+          return owner.start(options.resumeSessionId, () =>
+            original.call(this, context, persistence, options),
           )
         },
     )
@@ -100,10 +95,12 @@ export class Lifecycles {
       'initializeAgent',
       (original) =>
         async function (context, options) {
-          const id = options.session.id
+          const { id, header } = options.session
           if (
             owner.blocked.has(id) ||
-            (options.parentAgent && owner.blocked.has(options.parentAgent.id))
+            (header.origin === 'subagent' &&
+              header.parentSession &&
+              owner.blocked.has(header.parentSession))
           ) {
             await options.stored?.handle.close()
             throw new Error('This conversation is being deleted.')
@@ -144,10 +141,9 @@ export class Lifecycles {
 
   private async start<T>(
     id: SessionId,
-    parent: SessionId | undefined,
     operation: () => Promise<T>,
   ): Promise<T> {
-    if (this.blocked.has(id) || (parent && this.blocked.has(parent))) {
+    if (this.blocked.has(id)) {
       throw new Error('This conversation is being deleted.')
     }
     const pending = operation()

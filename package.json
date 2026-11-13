@@ -1,6 +1,6 @@
 {
   "name": "dsh-delete-button",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Delete conversations and their owned subagents in DeepSeek Harness.",
   "type": "module",
   "license": "MIT",
